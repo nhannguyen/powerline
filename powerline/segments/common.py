@@ -337,10 +337,10 @@ class WeatherSegment(ThreadedSegment):
 			# Do not lock attribute assignments in this branch: they are used 
 			# only in .update()
 			if not self.location:
-				location_data = json.loads(urllib_read('http://freegeoip.net/json/' + _external_ip()))
+				location_data = json.loads(urllib_read('http://freegeoip.net/json/'))
 				self.location = ','.join([location_data['city'],
-											location_data['region_name'],
-											location_data['country_name']])
+											location_data['region_code'],
+											location_data['country_code']])
 			query_data = {
 				'q':
 				'use "http://github.com/yql/yql-tables/raw/master/weather/weather.bylocation.xml" as we;'
@@ -593,8 +593,11 @@ username = False
 _geteuid = getattr(os, 'geteuid', lambda: 1)
 
 
-def user(pl, segment_info=None):
+def user(pl, segment_info=None, hide_user=None):
 	'''Return the current user.
+
+	:param str hide_user:
+		Omit showing segment for users with names equal to this string.
 
 	Highlights the user with the ``superuser`` if the effective user ID is 0.
 
@@ -605,6 +608,8 @@ def user(pl, segment_info=None):
 		username = _get_user(segment_info)
 	if username is None:
 		pl.warn('Failed to get username')
+		return None
+	if username == hide_user:
 		return None
 	euid = _geteuid()
 	return [{

@@ -38,7 +38,6 @@
         "cmdwin": "cmdwin",
         "help": "help",
         "quickfix": "quickfix",
-
         "powerline.matchers.plugin.nerdtree.nerdtree": "plugin/nerdtree",
         "powerline.matchers.plugin.ctrlp.ctrlp": "plugin/ctrlp",
         "powerline.matchers.plugin.gundo.gundo": "plugin/gundo",
