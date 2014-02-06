@@ -16,11 +16,11 @@ _powerline_tmux_setenv() {
 	fi
 }
 
-POWERLINE_SAVED_PWD=
+_POWERLINE_SAVED_PWD=
 
 _powerline_tmux_set_pwd() {
-	if test "x$POWERLINE_SAVED_PWD" != "x$PWD" ; then
-		POWERLINE_SAVED_PWD="$PWD"
+	if test "x$_POWERLINE_SAVED_PWD" != "x$PWD" ; then
+		_POWERLINE_SAVED_PWD="$PWD"
 		_powerline_tmux_setenv PWD "$PWD"
 	fi
 }
@@ -40,4 +40,4 @@ trap "_powerline_tmux_set_columns" SIGWINCH
 _powerline_tmux_set_columns
 
 [[ "$PROMPT_COMMAND" != "${PROMPT_COMMAND/_powerline_prompt/}" ]] ||
-	export PROMPT_COMMAND="${PROMPT_COMMAND}"$'\n'"_powerline_prompt;"
+	export PROMPT_COMMAND="${PROMPT_COMMAND}"$'\n'"_powerline_prompt"

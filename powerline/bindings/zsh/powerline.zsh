@@ -36,6 +36,7 @@ _powerline_precmd() {
 	# wrong number of jobs. You need to filter the lines first. Or not use 
 	# jobs built-in at all.
 	_POWERLINE_JOBNUM=${(%):-%j}
+	_powerline_set_true_keymap_name "${${(Q)${${(z)${"$(bindkey -lL main)"}}[3]}}:-.safe}"
 }
 
 _powerline_setup_prompt() {
@@ -47,10 +48,11 @@ _powerline_setup_prompt() {
 	done
 	precmd_functions+=( _powerline_precmd )
 	chpwd_functions+=( _powerline_tmux_set_pwd )
+	_powerline_set_true_keymap_name "${${(Q)${${(z)${"$(bindkey -lL main)"}}[3]}}:-.safe}"
 	if zmodload zsh/zpython &>/dev/null ; then
-		zpython 'from powerline.bindings.zsh import setup as powerline_setup'
-		zpython 'powerline_setup()'
-		zpython 'del powerline_setup'
+		zpython 'from powerline.bindings.zsh import setup as _powerline_setup'
+		zpython '_powerline_setup()'
+		zpython 'del _powerline_setup'
 	else
 		local add_args='--last_exit_code=$? --last_pipe_status="$pipestatus"'
 		add_args+=' --jobnum=$_POWERLINE_JOBNUM'
@@ -58,6 +60,51 @@ _powerline_setup_prompt() {
 		RPS1='$($POWERLINE_COMMAND shell right -r zsh_prompt '$add_args')'
 	fi
 }
+
+_powerline_add_widget() {
+	local widget="$1"
+	local function="$2"
+	local old_widget_command="$(zle -l -L $widget)"
+	if [[ "$old_widget_command" = "zle -N $widget $function" ]] ; then
+		return 0
+	elif [[ -z "$old_widget_command" ]] ; then
+		zle -N $widget $function
+	else
+		local save_widget="_powerline_save_$widget"
+		local -i i=0
+		while ! test -z "$(zle -l -L $save_widget)" ; do
+			save_widget="${save_widget}_$i"
+			(( i++ ))
+		done
+		# If widget was defined with `zle -N widget` (without `function` 
+		# argument) then this function will be handy.
+		eval "function $save_widget() { emulate -L zsh; $widget \$@ }"
+		eval "${old_widget_command/$widget/$save_widget}"
+		zle -N $widget $function
+		export _POWERLINE_SAVE_WIDGET="$save_widget"
+	fi
+}
+
+_powerline_set_true_keymap_name() {
+	export _POWERLINE_MODE="${1}"
+	local plm_bk="$(bindkey -lL ${_POWERLINE_MODE})"
+	if [[ $plm_bk = 'bindkey -A'* ]] ; then
+		_powerline_set_true_keymap_name ${(Q)${${(z)plm_bk}[3]}}
+	fi
+}
+
+_powerline_zle_keymap_select() {
+	_powerline_set_true_keymap_name $KEYMAP
+	zle reset-prompt
+	test -z "$_POWERLINE_SAVE_WIDGET" || zle $_POWERLINE_SAVE_WIDGET
+}
+
+_powerline_add_widget zle-keymap-select _powerline_zle_keymap_select
+_powerline_precmd
+
+if [[ "$_POWERLINE_MODE" != vi* ]] ; then
+	export _POWERLINE_DEFAULT_MODE="$_POWERLINE_MODE"
+fi
 
 trap "_powerline_tmux_set_columns" SIGWINCH
 _powerline_tmux_set_columns
