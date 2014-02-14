@@ -1,9 +1,10 @@
 # vim:fileencoding=utf-8:noet
 
-from __future__ import unicode_literals, absolute_import
+from __future__ import unicode_literals, absolute_import, division
 
 import os
 import sys
+import re
 
 from datetime import datetime
 import socket
@@ -16,6 +17,7 @@ from powerline.lib.vcs import guess, tree_status
 from powerline.lib.threaded import ThreadedSegment, KwThreadedSegment, with_docstring
 from powerline.lib.monotonic import monotonic
 from powerline.lib.humanize_bytes import humanize_bytes
+from powerline.lib.unicode import u
 from powerline.theme import requires_segment_info
 from collections import namedtuple
 
@@ -89,9 +91,8 @@ def cwd(pl, segment_info, dir_shorten_len=None, dir_limit_depth=None, use_path_s
 
 	Highlight groups used: ``cwd:current_folder`` or ``cwd``. It is recommended to define all highlight groups.
 	'''
-	import re
 	try:
-		cwd = segment_info['getcwd']()
+		cwd = u(segment_info['getcwd']())
 	except OSError as e:
 		if e.errno == 2:
 			# user most probably deleted the directory
@@ -102,6 +103,7 @@ def cwd(pl, segment_info, dir_shorten_len=None, dir_limit_depth=None, use_path_s
 			raise
 	home = segment_info['home']
 	if home:
+		home = u(home)
 		cwd = re.sub('^' + re.escape(home), '~', cwd, 1)
 	cwd_split = cwd.split(os.sep)
 	cwd_split_len = len(cwd_split)
@@ -335,7 +337,7 @@ class WeatherSegment(ThreadedSegment):
 		import json
 
 		if not self.url:
-			# Do not lock attribute assignments in this branch: they are used 
+			# Do not lock attribute assignments in this branch: they are used
 			# only in .update()
 			if not self.location:
 				location_data = json.loads(urllib_read('http://freegeoip.net/json/'))
@@ -428,12 +430,12 @@ weather conditions.
 :param str temp_format:
 	format string, receives ``temp`` as an argument. Should also hold unit.
 :param float temp_coldest:
-	coldest temperature. Any temperature below it will have gradient level equal 
+	coldest temperature. Any temperature below it will have gradient level equal
 	to zero.
 :param float temp_hottest:
-	hottest temperature. Any temperature above it will have gradient level equal 
-	to 100. Temperatures between ``temp_coldest`` and ``temp_hottest`` receive 
-	gradient level that indicates relative position in this interval 
+	hottest temperature. Any temperature above it will have gradient level equal
+	to 100. Temperatures between ``temp_coldest`` and ``temp_hottest`` receive
+	gradient level that indicates relative position in this interval
 	(``100 * (cur-coldest) / (hottest-coldest)``).
 
 Divider highlight group used: ``background:divider``.
@@ -453,17 +455,17 @@ def system_load(pl, format='{avg:.1f}', threshold_good=1, threshold_bad=2, track
 	:param str format:
 		format string, receives ``avg`` as an argument
 	:param float threshold_good:
-		threshold for gradient level 0: any normalized load average below this 
+		threshold for gradient level 0: any normalized load average below this
 		value will have this gradient level.
 	:param float threshold_bad:
-		threshold for gradient level 100: any normalized load average above this 
-		value will have this gradient level. Load averages between 
-		``threshold_good`` and ``threshold_bad`` receive gradient level that 
+		threshold for gradient level 100: any normalized load average above this
+		value will have this gradient level. Load averages between
+		``threshold_good`` and ``threshold_bad`` receive gradient level that
 		indicates relative position in this interval:
 		(``100 * (cur-good) / (bad-good)``).
 		Note: both parameters are checked against normalized load averages.
 	:param bool track_cpu_count:
-		if True powerline will continuously poll the system to detect changes 
+		if True powerline will continuously poll the system to detect changes
 		in the number of CPUs.
 
 	Divider highlight group used: ``background:divider``.
@@ -629,7 +631,7 @@ elif 'psutil' in globals():
 	from time import time
 
 	def _get_uptime():  # NOQA
-		# psutil.BOOT_TIME is not subject to clock adjustments, but time() is. 
+		# psutil.BOOT_TIME is not subject to clock adjustments, but time() is.
 		# Thus it is a fallback to /proc/uptime reading and not the reverse.
 		return int(time() - psutil.BOOT_TIME)
 else:
@@ -672,7 +674,6 @@ def uptime(pl, days_format='{days:d}d', hours_format=' {hours:d}h', minutes_form
 
 
 class NetworkLoadSegment(KwThreadedSegment):
-	import re
 	interfaces = {}
 	replace_num_pat = re.compile(r'[a-zA-Z]+')
 
@@ -781,10 +782,10 @@ falls back to reading
 :param str sent_format:
 	format string, receives ``value`` as argument
 :param float recv_max:
-	maximum number of received bytes per second. Is only used to compute 
+	maximum number of received bytes per second. Is only used to compute
 	gradient level
 :param float sent_max:
-	maximum number of sent bytes per second. Is only used to compute gradient 
+	maximum number of sent bytes per second. Is only used to compute gradient
 	level
 
 Divider highlight group used: ``background:divider``.
@@ -815,14 +816,14 @@ class EmailIMAPSegment(KwThreadedSegment):
 			return None
 		try:
 			import imaplib
-			import re
+		except imaplib.IMAP4.error as e:
+			unread_count = str(e)
+		else:
 			mail = imaplib.IMAP4_SSL(key.server, key.port)
 			mail.login(key.username, key.password)
 			rc, message = mail.status(key.folder, '(UNSEEN)')
 			unread_str = message[0].decode('utf-8')
 			unread_count = int(re.search('UNSEEN (\d+)', unread_str).group(1))
-		except imaplib.IMAP4.error as e:
-			unread_count = str(e)
 		return unread_count
 
 	@staticmethod
@@ -856,8 +857,8 @@ email_imap_alert = with_docstring(EmailIMAPSegment(),
 :param str folder:
 	folder to check for e-mails
 :param int max_msgs:
-	Maximum number of messages. If there are more messages then max_msgs then it 
-	will use gradient level equal to 100, otherwise gradient level is equal to 
+	Maximum number of messages. If there are more messages then max_msgs then it
+	will use gradient level equal to 100, otherwise gradient level is equal to
 	``100 * msgs_num / max_msgs``. If not present gradient is not computed.
 
 Highlight groups used: ``email_alert_gradient`` (gradient), ``email_alert``.
@@ -944,6 +945,18 @@ class NowPlayingSegment(object):
 	def player_mpd(self, pl, host='localhost', port=6600):
 		try:
 			import mpd
+		except ImportError:
+			now_playing = run_cmd(pl, ['mpc', 'current', '-f', '%album%\n%artist%\n%title%\n%time%', '-h', str(host), '-p', str(port)])
+			if not now_playing:
+				return
+			now_playing = now_playing.split('\n')
+			return {
+				'album': now_playing[0],
+				'artist': now_playing[1],
+				'title': now_playing[2],
+				'total': now_playing[3],
+			}
+		else:
 			client = mpd.MPDClient()
 			client.connect(host, port)
 			now_playing = client.currentsong()
@@ -960,17 +973,6 @@ class NowPlayingSegment(object):
 				'title': now_playing.get('title'),
 				'elapsed': self._convert_seconds(now_playing.get('elapsed', 0)),
 				'total': self._convert_seconds(now_playing.get('time', 0)),
-			}
-		except ImportError:
-			now_playing = run_cmd(pl, ['mpc', 'current', '-f', '%album%\n%artist%\n%title%\n%time%', '-h', str(host), '-p', str(port)])
-			if not now_playing:
-				return
-			now_playing = now_playing.split('\n')
-			return {
-				'album': now_playing[0],
-				'artist': now_playing[1],
-				'title': now_playing[2],
-				'total': now_playing[3],
 			}
 
 	def player_spotify_dbus(self, pl, dbus=None):
@@ -1074,51 +1076,63 @@ now_playing = NowPlayingSegment()
 
 
 if os.path.exists('/sys/class/power_supply/BAT0/capacity'):
-	def _get_capacity():
+	def _get_capacity(pl):
 		with open('/sys/class/power_supply/BAT0/capacity', 'r') as f:
 			return int(float(f.readline().split()[0]))
+elif os.path.exists('/usr/bin/pmset'):
+	def _get_capacity(pl):
+		import re
+		battery_summary = run_cmd(pl, ['pmset', '-g', 'batt'])
+		battery_percent = re.search(r'(\d+)%', battery_summary).group(1)
+		return int(battery_percent)
 else:
-	def _get_capacity():
+	def _get_capacity(pl):
 		raise NotImplementedError
 
 
-def battery(pl, format='{batt:3.0%}', steps=5, gamify=False):
+def battery(pl, format='{capacity:3.0%}', steps=5, gamify=False, full_heart='♥', empty_heart='♥'):
 	'''Return battery charge status.
 
+	:param str format:
+		Percent format in case gamify is False.
 	:param int steps:
-		number of discrete steps to show between 0% and 100% capacity
+		Number of discrete steps to show between 0% and 100% capacity if gamify
+		is True.
 	:param bool gamify:
-		measure in hearts (♥) instead of percentages
+		Measure in hearts (♥) instead of percentages.
+	:param str full_heart:
+		Heart displayed for “full” part of battery.
+	:param str empty_heart:
+		Heart displayed for “used” part of battery. It is also displayed using
+		another gradient level, so it is OK for it to be the same as full_heart.
 
 	Highlight groups used: ``battery_gradient`` (gradient), ``battery``.
 	'''
 	try:
-		capacity = _get_capacity()
+		capacity = _get_capacity(pl)
 	except NotImplementedError:
 		pl.warn('Unable to get battery capacity.')
 		return None
 	ret = []
-	denom = int(steps)
-	numer = int(denom * capacity / 100)
-	full_heart = '♥'
 	if gamify:
+		denom = int(steps)
+		numer = int(denom * capacity / 100)
 		ret.append({
 			'contents': full_heart * numer,
-			'draw_soft_divider': False,
+			'draw_inner_divider': False,
 			'highlight_group': ['battery_gradient', 'battery'],
-			'gradient_level': 99
+			'gradient_level': 99,
 		})
 		ret.append({
-			'contents': full_heart * (denom - numer),
-			'draw_soft_divider': False,
+			'contents': empty_heart * (denom - numer),
+			'draw_inner_divider': False,
 			'highlight_group': ['battery_gradient', 'battery'],
-			'gradient_level': 1
+			'gradient_level': 1,
 		})
 	else:
-		batt = numer / float(denom)
 		ret.append({
-			'contents': format.format(batt=batt),
+			'contents': format.format(capacity=(capacity / 100.0)),
 			'highlight_group': ['battery_gradient', 'battery'],
-			'gradient_level': batt * 100
+			'gradient_level': capacity,
 		})
 	return ret
