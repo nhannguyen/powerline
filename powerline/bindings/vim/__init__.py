@@ -90,7 +90,7 @@ else:
 
 if hasattr(vim, 'options'):
 	def vim_getbufoption(info, option):
-		return info['buffer'].options[option]
+		return info['buffer'].options[str(option)]
 else:
 	def vim_getbufoption(info, option):  # NOQA
 		return getbufvar(info['bufnr'], '&' + option)
@@ -129,6 +129,7 @@ if sys.version_info < (3,):
 		return buf.name
 else:
 	vim_bufname = vim_get_func('bufname')
+
 	def buffer_name(buf):  # NOQA
 		try:
 			name = buf.name
