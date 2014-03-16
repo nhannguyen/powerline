@@ -41,16 +41,16 @@
           "dir_shorten_len": 1,
           "use_path_separator": true
 				}
-			}
-		],
-		"right": [
-			{
-				"module": "powerline.segments.shell",
-				"name": "last_pipe_status"
 			},
 			{
 				"name": "branch"
+			},
+			{
+				"module": "powerline.segments.shell",
+				"name": "last_status"
 			}
+		],
+		"right": [
 		]
 	}
 }
