@@ -47,7 +47,14 @@
 			},
 			{
 				"name": "branch"
-			}
+			},
+      {
+          "name": "date",
+          "args": {
+              "format": "%H:%M",
+              "istime": true
+          }
+      }
 		]
 	}
 }

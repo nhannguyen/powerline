@@ -17,7 +17,10 @@
 		"exit_fail":            { "fg": "oldlace", "bg": "red" },
 		"exit_success":         { "fg": "oldlace", "bg": "green" },
 		"environment":          { "fg": "oldlace", "bg": "green" },
-		"mode":                 { "fg": "oldlace", "bg": "green", "attr": ["bold"] }
+		"mode":                 { "fg": "oldlace", "bg": "green", "attr": ["bold"] },
+    "date":                 { "fg": "oldlace", "bg": "gray2" },
+    "time":                 { "fg": "oldlace", "bg": "gray2" },
+    "time:divider":         { "fg": "oldlace", "bg": "gray2" }
 	},
 	"mode_translations": {
 		"vicmd": {
