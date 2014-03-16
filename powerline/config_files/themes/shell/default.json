@@ -20,10 +20,6 @@
 	"segments": {
 		"left": [
 			{
-				"module": "powerline.segments.shell",
-				"name": "mode"
-			},
-			{
 				"name": "hostname"
 			},
 			{
