@@ -1,6 +1,9 @@
 {
 	"default_module": "powerline.segments.common",
 	"segment_data": {
+    "date": {
+      "before": "⌚ "
+    },
 		"hostname": {
 			"before": " ",
 			"args": {
