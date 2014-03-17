@@ -86,15 +86,15 @@ _powerline_init_modes_support() {
 }
 
 _powerline_set_jobnum() {
-	# If you are wondering why I am not using the same code as I use for bash 
+	# If you are wondering why I am not using the same code as I use for bash
 	# ($(jobs|wc -l)): consider the following test:
 	#     echo abc | less
 	#     <C-z>
 	# . This way jobs will print
 	#     [1]  + done       echo abc |
 	#            suspended  less -M
-	# ([ is in first column). You see: any line counting thingie will return 
-	# wrong number of jobs. You need to filter the lines first. Or not use 
+	# ([ is in first column). You see: any line counting thingie will return
+	# wrong number of jobs. You need to filter the lines first. Or not use
 	# jobs built-in at all.
 	_POWERLINE_JOBNUM=${(%):-%j}
 }
@@ -116,9 +116,11 @@ _powerline_setup_prompt() {
 		add_args+=' --renderer_arg="client_id=$$"'
 		add_args+=' --jobnum=$_POWERLINE_JOBNUM'
 		local add_args_2=$add_args' -R parser_state=${(%%):-%_} -R local_theme=continuation'
-		PS1='$($POWERLINE_COMMAND shell left -r zsh_prompt '$add_args')'
+		PS1='$($POWERLINE_COMMAND shell left -r zsh_prompt '$add_args')
+  ❯ '
 		RPS1='$($POWERLINE_COMMAND shell right -r zsh_prompt '$add_args')'
-		PS2='$($POWERLINE_COMMAND shell left -r zsh_prompt '$add_args_2')'
+		#PS2='$($POWERLINE_COMMAND shell left -r zsh_prompt '$add_args_2')'
+    PS2='  → '
 		RPS2='$($POWERLINE_COMMAND shell right -r zsh_prompt '$add_args_2')'
 		PS3='$($POWERLINE_COMMAND shell left -r zsh_prompt -R local_theme=select '$add_args')'
 	fi
@@ -139,7 +141,7 @@ _powerline_add_widget() {
 			save_widget="${save_widget}_$i"
 			(( i++ ))
 		done
-		# If widget was defined with `zle -N widget` (without `function` 
+		# If widget was defined with `zle -N widget` (without `function`
 		# argument) then this function will be handy.
 		eval "function $save_widget() { emulate -L zsh; $widget \$@ }"
 		eval "${old_widget_command/$widget/$save_widget}"
