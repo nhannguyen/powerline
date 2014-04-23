@@ -12,8 +12,7 @@ integer _POWERLINE_JOBNUM
 
 _powerline_init_tmux_support() {
 	emulate -L zsh
-	# Note: `test -w ""` returns false, so first condition may be removed
-	if test -n "$TMUX" && test -w "$TMUX" ; then
+	if test -n "$TMUX" && tmux refresh -S &>/dev/null ; then
 		# TMUX variable may be unset to create new tmux session inside this one
 		typeset -g _POWERLINE_TMUX="$TMUX"
 
@@ -76,12 +75,13 @@ _powerline_init_modes_support() {
 		_powerline_set_true_keymap_name "$REPLY"
 	}
 
+	_powerline_add_widget zle-keymap-select _powerline_zle_keymap_select
+	_powerline_set_main_keymap_name
+
 	if [[ "$_POWERLINE_MODE" != vi* ]] ; then
 		export _POWERLINE_DEFAULT_MODE="$_POWERLINE_MODE"
 	fi
 
-	_powerline_add_widget zle-keymap-select _powerline_zle_keymap_select
-	_powerline_set_main_keymap_name
 	precmd_functions+=( _powerline_set_main_keymap_name )
 }
 
