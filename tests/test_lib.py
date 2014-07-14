@@ -1,15 +1,19 @@
 # vim:fileencoding=utf-8:noet
 from __future__ import division
 
-from powerline.lib import mergedicts, add_divider_highlight_group
+from powerline.lib import mergedicts, add_divider_highlight_group, REMOVE_THIS_KEY
 from powerline.lib.humanize_bytes import humanize_bytes
-from powerline.lib.vcs import guess
+from powerline.lib.vcs import guess, get_fallback_create_watcher
 from powerline.lib.threaded import ThreadedSegment, KwThreadedSegment
 from powerline.lib.monotonic import monotonic
+from powerline.lib.file_watcher import create_file_watcher, INotifyError
+from powerline.lib.vcs.git import git_directory
+from powerline import get_fallback_logger
 import threading
 import os
 import sys
 import re
+import platform
 from time import sleep
 from subprocess import call, PIPE
 from functools import partial
@@ -354,6 +358,8 @@ class TestLib(TestCase):
 		self.assertEqual(d, {'abc': {'def': {'ghi': 'jkl'}}})
 		mergedicts(d, {'abc': {'mno': 'pqr'}})
 		self.assertEqual(d, {'abc': {'def': {'ghi': 'jkl'}, 'mno': 'pqr'}})
+		mergedicts(d, {'abc': {'def': REMOVE_THIS_KEY}})
+		self.assertEqual(d, {'abc': {'mno': 'pqr'}})
 
 	def test_add_divider_highlight_group(self):
 		def decorated_function_name(**kwargs):
@@ -382,9 +388,9 @@ class TestFilesystemWatchers(TestCase):
 		self.fail('The change to {0} was not detected'.format(path))
 
 	def test_file_watcher(self):
-		from powerline.lib.file_watcher import create_file_watcher
-		w = create_file_watcher(use_stat=False)
-		if w.is_stat_based:
+		try:
+			w = create_file_watcher(pl=get_fallback_logger(), watcher_type='inotify')
+		except INotifyError:
 			raise SkipTest('This test is not suitable for a stat based file watcher')
 		f1, f2, f3 = map(lambda x: os.path.join(INOTIFY_DIR, 'file%d' % x), (1, 2, 3))
 		with open(f1, 'wb'):
@@ -461,7 +467,8 @@ class TestFilesystemWatchers(TestCase):
 		os.rename(f, f + '1')
 		changed()
 
-use_mercurial = use_bzr = sys.version_info < (3, 0)
+use_mercurial = use_bzr = (sys.version_info < (3, 0)
+							and platform.python_implementation() == 'CPython')
 
 
 class TestVCS(TestCase):
@@ -483,7 +490,8 @@ class TestVCS(TestCase):
 			self.assertEqual(ans, q)
 
 	def test_git(self):
-		repo = guess(path=GIT_REPO)
+		create_watcher = get_fallback_create_watcher()
+		repo = guess(path=GIT_REPO, create_watcher=create_watcher)
 		self.assertNotEqual(repo, None)
 		self.assertEqual(repo.branch(), 'master')
 		self.assertEqual(repo.status(), None)
@@ -503,22 +511,39 @@ class TestVCS(TestCase):
 		os.remove(os.path.join(GIT_REPO, 'file'))
 		# Test changing branch
 		self.assertEqual(repo.branch(), 'master')
-		call(['git', 'branch', 'branch1'], cwd=GIT_REPO)
-		call(['git', 'checkout', '-q', 'branch1'], cwd=GIT_REPO)
-		self.do_branch_rename_test(repo, 'branch1')
-		# For some reason the rest of this test fails on travis and only on
-		# travis, and I can't figure out why
-		if 'TRAVIS' in os.environ:
-			raise SkipTest('Part of this test fails on Travis for unknown reasons')
-		call(['git', 'branch', 'branch2'], cwd=GIT_REPO)
-		call(['git', 'checkout', '-q', 'branch2'], cwd=GIT_REPO)
-		self.do_branch_rename_test(repo, 'branch2')
-		call(['git', 'checkout', '-q', '--detach', 'branch1'], cwd=GIT_REPO)
-		self.do_branch_rename_test(repo, lambda b: re.match(r'^[a-f0-9]+$', b))
+		try:
+			call(['git', 'branch', 'branch1'], cwd=GIT_REPO)
+			call(['git', 'checkout', '-q', 'branch1'], cwd=GIT_REPO)
+			self.do_branch_rename_test(repo, 'branch1')
+			call(['git', 'branch', 'branch2'], cwd=GIT_REPO)
+			call(['git', 'checkout', '-q', 'branch2'], cwd=GIT_REPO)
+			self.do_branch_rename_test(repo, 'branch2')
+			call(['git', 'checkout', '-q', '--detach', 'branch1'], cwd=GIT_REPO)
+			self.do_branch_rename_test(repo, lambda b: re.match(br'^[a-f0-9]+$', b))
+		finally:
+			call(['git', 'checkout', '-q', 'master'], cwd=GIT_REPO)
+
+	def test_git_sym(self):
+		create_watcher = get_fallback_create_watcher()
+		dotgit = os.path.join(GIT_REPO, '.git')
+		spacegit = os.path.join(GIT_REPO, ' .git ')
+		os.rename(dotgit, spacegit)
+		try:
+			with open(dotgit, 'w') as F:
+				F.write('gitdir:  .git \n')
+			gitdir = git_directory(GIT_REPO)
+			self.assertTrue(os.path.isdir(gitdir))
+			self.assertEqual(gitdir, os.path.abspath(spacegit))
+			repo = guess(path=GIT_REPO, create_watcher=create_watcher)
+			self.assertEqual(repo.branch(), 'master')
+		finally:
+			os.remove(dotgit)
+			os.rename(spacegit, dotgit)
 
 	if use_mercurial:
 		def test_mercurial(self):
-			repo = guess(path=HG_REPO)
+			create_watcher = get_fallback_create_watcher()
+			repo = guess(path=HG_REPO, create_watcher=create_watcher)
 			self.assertNotEqual(repo, None)
 			self.assertEqual(repo.branch(), 'default')
 			self.assertEqual(repo.status(), None)
@@ -534,7 +559,8 @@ class TestVCS(TestCase):
 
 	if use_bzr:
 		def test_bzr(self):
-			repo = guess(path=BZR_REPO)
+			create_watcher = get_fallback_create_watcher()
+			repo = guess(path=BZR_REPO, create_watcher=create_watcher)
 			self.assertNotEqual(repo, None, 'No bzr repo found. Do you have bzr installed?')
 			self.assertEqual(repo.branch(), 'test_powerline')
 			self.assertEqual(repo.status(), None)
@@ -585,7 +611,7 @@ class TestVCS(TestCase):
 				os.mkdir(d)
 				call(['bzr', 'init', '-q'], cwd=d)
 				call(['bzr', 'nick', '-q', x], cwd=d)
-				repo = guess(path=d)
+				repo = guess(path=d, create_watcher=create_watcher)
 				self.assertEqual(repo.branch(), x)
 				self.assertFalse(repo.status())
 				if x == 'b1':
@@ -596,7 +622,7 @@ class TestVCS(TestCase):
 			os.rename(os.path.join(BZR_REPO, 'b'), os.path.join(BZR_REPO, 'b2'))
 			for x, y in (('b1', 'b2'), ('b2', 'b1')):
 				d = os.path.join(BZR_REPO, x)
-				repo = guess(path=d)
+				repo = guess(path=d, create_watcher=create_watcher)
 				self.do_branch_rename_test(repo, y)
 				if x == 'b1':
 					self.assertFalse(repo.status())

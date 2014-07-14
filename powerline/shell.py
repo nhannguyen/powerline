@@ -7,8 +7,7 @@ from powerline.lib import mergedicts, parsedotval
 def mergeargs(argvalue):
 	if not argvalue:
 		return None
-	argvalue = iter(argvalue)
-	r = dict([next(argvalue)])
+	r = {}
 	for subval in argvalue:
 		mergedicts(r, dict([subval]))
 	return r
@@ -52,7 +51,7 @@ def get_argparser(parser=None, *args, **kwargs):
 		parser = argparse.ArgumentParser
 	p = parser(*args, **kwargs)
 	p.add_argument('ext', nargs=1)
-	p.add_argument('side', nargs='?', choices=('left', 'right'))
+	p.add_argument('side', nargs='?', choices=('left', 'right', 'above', 'aboveleft'))
 	p.add_argument('-r', '--renderer_module', metavar='MODULE', type=str)
 	p.add_argument('-w', '--width', type=int)
 	p.add_argument('--last_exit_code', metavar='INT', type=int)

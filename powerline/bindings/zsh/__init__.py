@@ -1,4 +1,6 @@
 # vim:fileencoding=utf-8:noet
+from __future__ import absolute_import, unicode_literals, division, print_function
+
 import zsh
 import atexit
 from powerline.shell import ShellPowerline
@@ -21,16 +23,9 @@ def get_var_config(var):
 
 
 class Args(object):
+	__slots__ = ('last_pipe_status', 'last_exit_code')
 	ext = ['shell']
 	renderer_module = 'zsh_prompt'
-
-	@property
-	def last_exit_code(self):
-		return zsh.last_exit_code()
-
-	@property
-	def last_pipe_status(self):
-		return zsh.pipestatus()
 
 	@property
 	def config(self):
@@ -55,7 +50,6 @@ class Args(object):
 
 	@property
 	def jobnum(self):
-		zsh.eval('integer _POWERLINE_JOBNUM=${(%):-%j}')
 		return zsh.getvalue('_POWERLINE_JOBNUM')
 
 
@@ -93,12 +87,19 @@ class Environment(object):
 environ = Environment()
 
 
-class Prompt(object):
-	__slots__ = ('powerline', 'side', 'savedpsvar', 'savedps', 'args', 'theme')
+class ZshPowerline(ShellPowerline):
+	def precmd(self):
+		self.args.last_pipe_status = zsh.pipestatus()
+		self.args.last_exit_code = zsh.last_exit_code()
 
-	def __init__(self, powerline, side, theme, savedpsvar=None, savedps=None):
+
+class Prompt(object):
+	__slots__ = ('powerline', 'side', 'savedpsvar', 'savedps', 'args', 'theme', 'above')
+
+	def __init__(self, powerline, side, theme, savedpsvar=None, savedps=None, above=False):
 		self.powerline = powerline
 		self.side = side
+		self.above = above
 		self.savedpsvar = savedpsvar
 		self.savedps = savedps
 		self.args = powerline.args
@@ -113,7 +114,14 @@ class Prompt(object):
 			'local_theme': self.theme,
 			'parser_state': zsh.getvalue('_POWERLINE_PARSER_STATE'),
 		}
-		r = self.powerline.render(
+		r = ''
+		if self.above:
+			for line in self.powerline.render_above_lines(
+				width=zsh.columns() - 1,
+				segment_info=segment_info,
+			):
+				r += line + '\n'
+		r += self.powerline.render(
 			width=zsh.columns(),
 			side=self.side,
 			segment_info=segment_info,
@@ -133,24 +141,25 @@ class Prompt(object):
 			self.powerline.shutdown()
 
 
-def set_prompt(powerline, psvar, side, theme):
+def set_prompt(powerline, psvar, side, theme, above=False):
 	try:
 		savedps = zsh.getvalue(psvar)
 	except IndexError:
 		savedps = None
 	zpyvar = 'ZPYTHON_POWERLINE_' + psvar
-	prompt = Prompt(powerline, side, theme, psvar, savedps)
+	prompt = Prompt(powerline, side, theme, psvar, savedps, above)
 	zsh.set_special_string(zpyvar, prompt)
 	zsh.setvalue(psvar, '${' + zpyvar + '}')
 
 
 def setup():
-	powerline = ShellPowerline(Args())
+	powerline = ZshPowerline(Args())
 	used_powerlines.append(powerline)
 	used_powerlines.append(powerline)
-	set_prompt(powerline, 'PS1', 'left', None)
+	set_prompt(powerline, 'PS1', 'left', None, above=True)
 	set_prompt(powerline, 'RPS1', 'right', None)
 	set_prompt(powerline, 'PS2', 'left', 'continuation')
 	set_prompt(powerline, 'RPS2', 'right', 'continuation')
 	set_prompt(powerline, 'PS3', 'left', 'select')
 	atexit.register(shutdown)
+	return powerline

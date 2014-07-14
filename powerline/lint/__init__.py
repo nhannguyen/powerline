@@ -1,12 +1,13 @@
 # vim:fileencoding=utf-8:noet
 
 from powerline.lint.markedjson import load
-from powerline import find_config_file, Powerline
+from powerline import generate_config_finder, get_config_paths
 from powerline.lib.config import load_json_config
 from powerline.lint.markedjson.error import echoerr, MarkedError
 from powerline.segments.vim import vim_modes
 from powerline.lint.inspect import getconfigargspec
 from powerline.lib.threaded import ThreadedSegment
+from powerline.lib import mergedicts_copy
 import itertools
 import sys
 import os
@@ -73,25 +74,31 @@ class DelayedEchoErr(EchoErr):
 
 class Spec(object):
 	def __init__(self, **keys):
-		new_keys = {}
-		self.specs = list(keys.values())
-		for k, v in keys.items():
-			new_keys[k] = len(self.specs)
-			self.specs.append(v)
-		self.keys = new_keys
+		self.specs = []
+		self.keys = {}
 		self.checks = []
 		self.cmsg = ''
 		self.isoptional = False
 		self.uspecs = []
 		self.ufailmsg = lambda key: 'found unknown key: {0}'.format(key)
-		if keys:
+		self.did_type = False
+		self.update(**keys)
+
+	def update(self, **keys):
+		for k, v in keys.items():
+			self.keys[k] = len(self.specs)
+			self.specs.append(v)
+		if self.keys and not self.did_type:
 			self.type(dict)
+			self.did_type = True
+		return self
 
 	def copy(self):
-		return self.__class__().update(self.__dict__)
+		return self.__class__()._update(self.__dict__)
 
-	def update(self, d):
+	def _update(self, d):
 		self.__dict__.update(d)
+		self.keys = copy(self.keys)
 		self.checks = copy(self.checks)
 		self.uspecs = copy(self.uspecs)
 		self.specs = [spec.copy() for spec in self.specs]
@@ -408,14 +415,20 @@ def check_matcher_func(ext, match_name, data, context, echoerr):
 def check_ext(ext, data, context, echoerr):
 	hadsomedirs = False
 	hadproblem = False
-	for subdir in ('themes', 'colorschemes'):
-		if ext not in data['configs'][subdir]:
-			hadproblem = True
-			echoerr(context='Error while loading {0} extension configuration'.format(ext),
-					context_mark=ext.mark,
-					problem='{0} configuration does not exist'.format(subdir))
-		else:
-			hadsomedirs = True
+	if ext not in data['lists']['exts']:
+		hadproblem = True
+		echoerr(context='Error while loading {0} extension configuration'.format(ext),
+				context_mark=ext.mark,
+				problem='extension configuration does not exist')
+	else:
+		for typ in ('themes', 'colorschemes'):
+			if ext not in data['configs'][typ] and not data['configs']['top_' + typ]:
+				hadproblem = True
+				echoerr(context='Error while loading {0} extension configuration'.format(ext),
+						context_mark=ext.mark,
+						problem='{0} configuration does not exist'.format(typ))
+			else:
+				hadsomedirs = True
 	return hadsomedirs, hadproblem
 
 
@@ -425,7 +438,13 @@ def check_config(d, theme, data, context, echoerr):
 	else:
 		# local_themes
 		ext = context[-3][0]
-	if ext not in data['configs'][d] or theme not in data['configs'][d][ext]:
+	if ext not in data['lists']['exts']:
+		echoerr(context='Error while loading {0} extension configuration'.format(ext),
+				context_mark=ext.mark,
+				problem='extension configuration does not exist')
+		return True, False, True
+	if ((ext not in data['configs'][d] or theme not in data['configs'][d][ext])
+			and theme not in data['configs']['top_' + d]):
 		echoerr(context='Error while loading {0} from {1} extension configuration'.format(d[:-1], ext),
 				problem='failed to find configuration file {0}/{1}/{2}.json'.format(d, ext, theme),
 				problem_mark=theme.mark)
@@ -454,13 +473,14 @@ main_spec = (Spec(
 		# only for existence of the path, not for it being a directory
 		paths=Spec().list((lambda value, *args: (True, True, not os.path.exists(os.path.expanduser(value.value)))),
 					lambda value: 'path does not exist: {0}'.format(value)).optional(),
-		log_file=Spec().type(str).func(lambda value, *args: (True, True, not os.path.isdir(os.path.dirname(os.path.expanduser(value)))),
+		log_file=Spec().type(unicode).func(lambda value, *args: (True, True, not os.path.isdir(os.path.dirname(os.path.expanduser(value)))),
 						lambda value: 'directory does not exist: {0}'.format(os.path.dirname(value))).optional(),
 		log_level=Spec().re('^[A-Z]+$').func(lambda value, *args: (True, True, not hasattr(logging, value)),
 										lambda value: 'unknown debugging level {0}'.format(value)).optional(),
-		log_format=Spec().type(str).optional(),
+		log_format=Spec().type(unicode).optional(),
 		interval=Spec().either(Spec().cmp('gt', 0.0), Spec().type(type(None))).optional(),
 		reload_config=Spec().type(bool).optional(),
+		watcher=Spec().type(unicode).oneof(set(('auto', 'inotify', 'stat'))).optional(),
 	).context_message('Error while loading common configuration (key {key})'),
 	ext=Spec(
 		vim=Spec(
@@ -524,22 +544,84 @@ def check_color(color, data, context, echoerr):
 
 
 def check_translated_group_name(group, data, context, echoerr):
-	if group not in context[0][1].get('groups', {}):
-		echoerr(context='Error while checking translated group in colorscheme (key {key})'.format(key=context_key(context)),
-				problem='translated group {0} is not in main groups dictionary'.format(group),
-				problem_mark=group.mark)
-		return True, False, True
-	return True, False, False
+	return check_group(group, data, context, echoerr)
+
+
+def check_group(group, data, context, echoerr):
+	if not isinstance(group, unicode):
+		return True, False, False
+	colorscheme = data['colorscheme']
+	ext = data['ext']
+	configs = []
+	if ext:
+		if colorscheme == '__main__':
+			configs.append([config for config in data['ext_colorscheme_configs'][ext].items()])
+			configs.append([config for config in data['top_colorscheme_configs'].items()])
+		else:
+			try:
+				configs.append([data['ext_colorscheme_configs'][ext][colorscheme]])
+			except KeyError:
+				pass
+			try:
+				configs.append([data['ext_colorscheme_configs'][ext]['__main__']])
+			except KeyError:
+				pass
+			try:
+				configs.append([data['top_colorscheme_configs'][colorscheme]])
+			except KeyError:
+				pass
+	else:
+		try:
+			configs.append([data['top_colorscheme_configs'][colorscheme]])
+		except KeyError:
+			pass
+	new_echoerr = DelayedEchoErr(echoerr)
+	hadproblem = False
+	for config_lst in configs:
+		tofind = len(config_lst)
+		not_found = []
+		for config in config_lst:
+			if isinstance(config, tuple):
+				new_colorscheme, config = config
+				new_data = data.copy()
+				new_data['colorscheme'] = new_colorscheme
+			else:
+				new_data = data
+			try:
+				group_data = config['groups'][group]
+			except KeyError:
+				not_found.append(config.mark.name)
+			else:
+				proceed, echo, chadproblem = check_group(
+					group_data,
+					new_data,
+					context,
+					echoerr,
+				)
+				if chadproblem:
+					hadproblem = True
+				else:
+					tofind -= 1
+					if not tofind:
+						return proceed, echo, hadproblem
+				if not proceed:
+					break
+		if not_found:
+			new_echoerr(context='Error while checking group definition in colorscheme (key {key})'.format(key=context_key(context)),
+						problem='name {0} is not present in {1} {2} colorschemes: {3}'.format(group, tofind, ext, ', '.join(not_found)),
+						problem_mark=group.mark)
+	new_echoerr.echo_all()
+	return True, False, hadproblem
 
 
 color_spec = Spec().type(unicode).func(check_color).copy
 name_spec = Spec().type(unicode).len('gt', 0).optional().copy
-group_spec = Spec(
+group_name_spec = Spec().re('^\w+(?::\w+)?$').copy
+group_spec = Spec().either(Spec(
 	fg=color_spec(),
 	bg=color_spec(),
-	attr=Spec().list(Spec().type(unicode).oneof(set(('bold', 'italic', 'underline')))).optional(),
-).copy
-group_name_spec = Spec().re('^\w+(?::\w+)?$').copy
+	attr=Spec().list(Spec().type(unicode).oneof(set(('bold', 'italic', 'underline')))),
+), group_name_spec().func(check_group)).copy
 groups_spec = Spec().unknown_spec(
 	group_name_spec(),
 	group_spec(),
@@ -548,23 +630,32 @@ colorscheme_spec = (Spec(
 	name=name_spec(),
 	groups=groups_spec(),
 ).context_message('Error while loading coloscheme'))
+mode_translations_value_spec = Spec(
+	colors=Spec().unknown_spec(
+		color_spec(),
+		color_spec(),
+	).optional(),
+	groups=Spec().unknown_spec(
+		group_name_spec().func(check_translated_group_name),
+		group_spec(),
+	).optional(),
+).copy
+top_colorscheme_spec = (Spec(
+	name=name_spec(),
+	groups=groups_spec(),
+	mode_translations=Spec().unknown_spec(
+		Spec().type(unicode),
+		mode_translations_value_spec(),
+	).optional().context_message('Error while loading mode translations (key {key})').optional(),
+).context_message('Error while loading top-level coloscheme'))
 vim_mode_spec = Spec().oneof(set(list(vim_modes) + ['nc'])).copy
 vim_colorscheme_spec = (Spec(
 	name=name_spec(),
 	groups=groups_spec(),
 	mode_translations=Spec().unknown_spec(
 		vim_mode_spec(),
-		Spec(
-			colors=Spec().unknown_spec(
-				color_spec(),
-				color_spec(),
-			).optional(),
-			groups=Spec().unknown_spec(
-				group_name_spec().func(check_translated_group_name),
-				group_spec(),
-			).optional(),
-		),
-	).context_message('Error while loading mode translations (key {key})'),
+		mode_translations_value_spec(),
+	).optional().context_message('Error while loading mode translations (key {key})'),
 ).context_message('Error while loading vim colorscheme'))
 shell_mode_spec = Spec().re('^(?:[\w\-]+|\.safe)$').copy
 shell_colorscheme_spec = (Spec(
@@ -572,17 +663,8 @@ shell_colorscheme_spec = (Spec(
 	groups=groups_spec(),
 	mode_translations=Spec().unknown_spec(
 		shell_mode_spec(),
-		Spec(
-			colors=Spec().unknown_spec(
-				color_spec(),
-				color_spec(),
-			).optional(),
-			groups=Spec().unknown_spec(
-				group_name_spec().func(check_translated_group_name),
-				group_spec(),
-			).optional(),
-		),
-	).context_message('Error while loading mode translations (key {key})'),
+		mode_translations_value_spec(),
+	).optional().context_message('Error while loading mode translations (key {key})'),
 ).context_message('Error while loading shell colorscheme'))
 
 
@@ -1005,6 +1087,13 @@ segments_spec = Spec().optional().list(
 			lambda value: 'it is recommended that divider highlight group names end with ":divider"').optional(),
 	).func(check_full_segment_data),
 ).copy
+segdict_spec=Spec(
+	left=segments_spec().context_message('Error while loading segments from left side (key {key})'),
+	right=segments_spec().context_message('Error while loading segments from right side (key {key})'),
+).func(
+	lambda value, *args: (True, True, not (('left' in value) or ('right' in value))),
+	lambda value: 'segments dictionary must contain either left, right or both keys'
+).context_message('Error while loading segments (key {key})').copy
 theme_spec = (Spec(
 	default_module=segment_module_spec(),
 	segment_data=Spec().unknown_spec(
@@ -1016,18 +1105,13 @@ theme_spec = (Spec(
 			contents=Spec().type(unicode).optional(),
 		),
 	).optional().context_message('Error while loading segment data (key {key})'),
-	segments=Spec(
-		left=segments_spec().context_message('Error while loading segments from left side (key {key})'),
-		right=segments_spec().context_message('Error while loading segments from right side (key {key})'),
-	).func(
-		lambda value, *args: (True, True, not (('left' in value) or ('right' in value))),
-		lambda value: 'segments dictionary must contain either left, right or both keys'
-	).context_message('Error while loading segments (key {key})'),
+	segments=segdict_spec().update(above=Spec().list(segdict_spec()).optional()),
 ).context_message('Error while loading theme'))
 
 
 def check(path=None, debug=False):
-	search_paths = [path] if path else Powerline.get_config_paths()
+	search_paths = [path] if path else get_config_paths()
+	find_config_file = generate_config_finder(lambda: search_paths)
 
 	logger = logging.getLogger('powerline-lint')
 	logger.setLevel(logging.DEBUG if debug else logging.ERROR)
@@ -1035,44 +1119,60 @@ def check(path=None, debug=False):
 
 	ee = EchoErr(echoerr, logger)
 
-	dirs = {
+	paths = {
 		'themes': defaultdict(lambda: []),
-		'colorschemes': defaultdict(lambda: [])
+		'colorschemes': defaultdict(lambda: []),
+		'top_colorschemes': [],
+		'top_themes': [],
+	}
+	lists = {
+		'colorschemes': set(),
+		'themes': set(),
+		'exts': set(),
 	}
 	for path in reversed(search_paths):
-		for subdir in ('themes', 'colorschemes'):
-			d = os.path.join(path, subdir)
+		for typ in ('themes', 'colorschemes'):
+			d = os.path.join(path, typ)
 			if os.path.isdir(d):
-				for ext in os.listdir(d):
-					extd = os.path.join(d, ext)
-					if os.path.isdir(extd):
-						dirs[subdir][ext].append(extd)
-			elif os.path.exists(d):
+				for subp in os.listdir(d):
+					extpath = os.path.join(d, subp)
+					if os.path.isdir(extpath):
+						lists['exts'].add(subp)
+						paths[typ][subp].append(extpath)
+					elif extpath.endswith('.json'):
+						name = subp[:-5]
+						if name != '__main__':
+							lists[typ].add(name)
+						paths['top_' + typ].append(extpath)
+			else:
 				hadproblem = True
 				sys.stderr.write('Path {0} is supposed to be a directory, but it is not\n'.format(d))
 
-	configs = {
-		'themes': defaultdict(lambda: {}),
-		'colorschemes': defaultdict(lambda: {})
-	}
-	for subdir in ('themes', 'colorschemes'):
-		for ext in dirs[subdir]:
-			for d in dirs[subdir][ext]:
-				for config in os.listdir(d):
-					if os.path.isdir(os.path.join(d, config)):
-						dirs[subdir][ext].append(os.path.join(d, config))
-					elif config.endswith('.json'):
-						configs[subdir][ext][config[:-5]] = os.path.join(d, config)
+	configs = defaultdict(lambda: defaultdict(lambda: {}))
+	for typ in ('themes', 'colorschemes'):
+		for ext in paths[typ]:
+			for d in paths[typ][ext]:
+				for subp in os.listdir(d):
+					if subp.endswith('.json'):
+						name = subp[:-5]
+						if name != '__main__':
+							lists[typ].add(name)
+						configs[typ][ext][name] = os.path.join(d, subp)
+		for path in paths['top_' + typ]:
+			name = os.path.basename(path)[:-5]
+			configs['top_' + typ][name] = path
 
 	diff = set(configs['themes']) ^ set(configs['colorschemes'])
 	if diff:
 		hadproblem = True
 		for ext in diff:
-			sys.stderr.write('{0} extension {1} present only in {2}\n'.format(
-				ext,
-				'configuration' if (ext in dirs['themes'] and ext in dirs['colorschemes']) else 'directory',
-				'themes' if ext in configs['themes'] else 'colorschemes',
-			))
+			typ = 'colorschemes' if ext in configs['themes'] else 'themes'
+			if not configs['top_' + typ] or typ == 'themes':
+				sys.stderr.write('{0} extension {1} not present in {2}\n'.format(
+					ext,
+					'configuration' if (ext in paths['themes'] and ext in paths['colorschemes']) else 'directory',
+					typ,
+				))
 
 	lhadproblem = [False]
 
@@ -1084,7 +1184,7 @@ def check(path=None, debug=False):
 
 	hadproblem = False
 	try:
-		main_config = load_json_config(find_config_file(search_paths, 'config'), load=load_config, open_file=open_file)
+		main_config = load_json_config(find_config_file('config'), load=load_config, open_file=open_file)
 	except IOError:
 		main_config = {}
 		sys.stderr.write('\nConfiguration file not found: config.json\n')
@@ -1094,13 +1194,13 @@ def check(path=None, debug=False):
 		sys.stderr.write(str(e) + '\n')
 		hadproblem = True
 	else:
-		if main_spec.match(main_config, data={'configs': configs}, context=(('', main_config),), echoerr=ee)[1]:
+		if main_spec.match(main_config, data={'configs': configs, 'lists': lists}, context=(('', main_config),), echoerr=ee)[1]:
 			hadproblem = True
 
 	import_paths = [os.path.expanduser(path) for path in main_config.get('common', {}).get('paths', [])]
 
 	try:
-		colors_config = load_json_config(find_config_file(search_paths, 'colors'), load=load_config, open_file=open_file)
+		colors_config = load_json_config(find_config_file('colors'), load=load_config, open_file=open_file)
 	except IOError:
 		colors_config = {}
 		sys.stderr.write('\nConfiguration file not found: colors.json\n')
@@ -1116,9 +1216,30 @@ def check(path=None, debug=False):
 	if lhadproblem[0]:
 		hadproblem = True
 
-	colorscheme_configs = defaultdict(lambda: {})
+	top_colorscheme_configs = {}
+	data = {
+		'ext': None,
+		'top_colorscheme_configs': top_colorscheme_configs,
+		'ext_colorscheme_configs': {},
+		'colors_config': colors_config
+	}
+	for colorscheme, cfile in configs['top_colorschemes'].items():
+		with open_file(cfile) as config_file_fp:
+			try:
+				config, lhadproblem = load(config_file_fp)
+			except MarkedError as e:
+				sys.stderr.write(str(e) + '\n')
+				hadproblem = True
+				continue
+		if lhadproblem:
+			hadproblem = True
+		top_colorscheme_configs[colorscheme] = config
+		data['colorscheme'] = colorscheme
+		if top_colorscheme_spec.match(config, context=(('', config),), data=data, echoerr=ee)[1]:
+			hadproblem = True
+
+	ext_colorscheme_configs = defaultdict(lambda: {})
 	for ext in configs['colorschemes']:
-		data = {'ext': ext, 'colors_config': colors_config}
 		for colorscheme, cfile in configs['colorschemes'][ext].items():
 			with open_file(cfile) as config_file_fp:
 				try:
@@ -1129,7 +1250,17 @@ def check(path=None, debug=False):
 					continue
 			if lhadproblem:
 				hadproblem = True
-			colorscheme_configs[ext][colorscheme] = config
+			ext_colorscheme_configs[ext][colorscheme] = config
+
+	for ext, econfigs in ext_colorscheme_configs.items():
+		data = {
+			'ext': ext,
+			'top_colorscheme_configs': top_colorscheme_configs,
+			'ext_colorscheme_configs': ext_colorscheme_configs,
+			'colors_config': colors_config,
+		}
+		for colorscheme, config in econfigs.items():
+			data['colorscheme'] = colorscheme
 			if ext == 'vim':
 				spec = vim_colorscheme_spec
 			elif ext == 'shell':
@@ -1138,6 +1269,27 @@ def check(path=None, debug=False):
 				spec = colorscheme_spec
 			if spec.match(config, context=(('', config),), data=data, echoerr=ee)[1]:
 				hadproblem = True
+
+	colorscheme_configs = {}
+	for ext in lists['exts']:
+		colorscheme_configs[ext] = {}
+		for colorscheme in lists['colorschemes']:
+			econfigs = ext_colorscheme_configs[ext]
+			ecconfigs = econfigs.get(colorscheme)
+			mconfigs = (
+				top_colorscheme_configs.get(colorscheme),
+				econfigs.get('__main__'),
+				ecconfigs,
+			)
+			config = None
+			for mconfig in mconfigs:
+				if not mconfig:
+					continue
+				if config:
+					config = mergedicts_copy(config, mconfig)
+				else:
+					config = mconfig
+			colorscheme_configs[colorscheme] = config
 
 	theme_configs = defaultdict(lambda: {})
 	for ext in configs['themes']:
@@ -1152,6 +1304,7 @@ def check(path=None, debug=False):
 			if lhadproblem:
 				hadproblem = True
 			theme_configs[ext][theme] = config
+
 	for ext, configs in theme_configs.items():
 		data = {'ext': ext, 'colorscheme_configs': colorscheme_configs, 'import_paths': import_paths,
 				'main_config': main_config, 'ext_theme_configs': configs, 'colors_config': colors_config}

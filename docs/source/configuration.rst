@@ -16,7 +16,9 @@ Powerline provides default configurations in the following locations:
 `Main configuration`_
     :file:`powerline/config.json`
 `Colorschemes`_
-    :file:`powerline/colorschemes/{extension}/default.json`
+    :file:`powerline/colorschemes/{name}.json`, 
+    :file:`powerline/colorscheme/__main__.json`, 
+    :file:`powerline/colorschemes/{extension}/{name}.json`
 `Themes`_
     :file:`powerline/themes/{extension}/default.json`
 
@@ -128,6 +130,19 @@ Common configuration is a subdictionary that is a value of ``common`` key in
     letters, Cyrillic letters). Valid values: any positive integer; it is 
     suggested that you only set it to 1 (default) or 2.
 
+``watcher``
+    Select filesystem watcher. Variants are
+
+    =======  ===================================
+    Variant  Description
+    =======  ===================================
+    auto     Selects most performant watcher.
+    inotify  Select inotify watcher. Linux only.
+    stat     Select stat-based polling watcher.
+    =======  ===================================
+
+    Default is ``auto``.
+
 .. _config-common-additional_escapes:
 
 ``additional_escapes``
@@ -227,12 +242,22 @@ Color definitions
     * A list of cterm color indicies.
     * A list of hex color strings.
 
+    It is expected that you define gradients from least alert color to most 
+    alert or use non-alert colors.
+
 .. _config-colorschemes:
 
 Colorschemes
 ============
 
-:Location: :file:`powerline/colorschemes/{extension}/{name}.json`
+:Location: :file:`powerline/colorschemes/{name}.json`, 
+           :file:`powerline/colorscheme/__main__.json`, 
+           :file:`powerline/colorschemes/{extension}/{name}.json`
+
+Colorscheme files are processed in order given: definitions from each next file 
+override those from each previous file. It is required that either 
+:file:`powerline/colorschemes/{name}.json`, or 
+:file:`powerline/colorschemes/{extension}/{name}.json` exists.
 
 ``name``
     Name of the colorscheme.
@@ -242,21 +267,27 @@ Colorschemes
 ``groups``
     Segment highlighting groups, consisting of a dict where the key is the 
     name of the highlighting group (usually the function name for function 
-    segments), and the value is a dict that defines the foreground color, 
-    background color and optional attributes:
+    segments), and the value is either
 
-    ``fg``
-        Foreground color. Must be defined in :ref:`colors 
-        <config-colors-colors>`.
+    #) a dict that defines the foreground color, background color and 
+       attributes:
 
-    ``bg``
-        Background color. Must be defined in :ref:`colors 
-        <config-colors-colors>`.
+       ``fg``
+           Foreground color. Must be defined in :ref:`colors 
+           <config-colors-colors>`.
 
-    ``attr``
-        Optional list of attributes. Valid values are one or more of 
-        ``bold``, ``italic`` and ``underline``. Note that some attributes 
-        may be unavailable in some applications or terminal emulators.
+       ``bg``
+           Background color. Must be defined in :ref:`colors 
+           <config-colors-colors>`.
+
+       ``attr``
+           List of attributes. Valid values are one or more of ``bold``, 
+           ``italic`` and ``underline``. Note that some attributes may be 
+           unavailable in some applications or terminal emulators. If you do not 
+           need any attributes leave this empty.
+
+    #) a string (an alias): a name of existing group. This group’s definition 
+       will be used when this color is requested.
 
 ``mode_translations``
     Mode-specific highlighting for extensions that support it (e.g. the vim 
@@ -305,8 +336,22 @@ Themes
     step 2 is obviously avoided.
 
 ``segments``
-    A dict with a ``left`` and a ``right`` list, consisting of segment 
-    dicts. Each segment has the following options:
+    A dict with a ``left`` and a ``right`` lists, consisting of segment 
+    dictionaries. Shell themes may also contain ``above`` list of dictionaries. 
+    Each item in ``above`` list may have ``left`` and ``right`` keys like this 
+    dictionary, but no ``above`` key.
+
+    .. _config-themes-above:
+
+    ``above`` list is used for multiline shell configurations.
+
+    ``left`` and ``right`` lists are used for segments that should be put on the 
+    left or right side in the output. Actual mechanizm of putting segments on 
+    the left or the right depends on used renderer, but most renderers require 
+    one to specify segment with :ref:`width <config-themes-seg-width>` ``auto`` 
+    on either side to make generated line fill all of the available width.
+
+    Each segment dictionary has the following options:
 
     ``type``
         The segment type. Can be one of ``function`` (default), ``string`` 
@@ -368,6 +413,8 @@ Themes
         right (``r``).
 
     ``width``
+        .. _config-themes-seg-width:
+
         Enforces a specific width for this segment.
 
         This segment will work as a spacer if the width is set to ``auto``.
@@ -472,10 +519,16 @@ Powerline script has a number of options controlling powerline behavior. Here
     example: ``{"K1": V1, "K2": V2}``) is recursively merged with the contents 
     of the file.
 
+    If ``VALUE`` is omitted then corresponding key will be removed from the 
+    configuration (if it was present).
+
 ``-t THEME_NAME.KEY.NESTED_KEY=VALUE`` or ``--theme_option=THEME_NAME.KEY.NESTED_KEY=VALUE``
     Overrides options from :file:`powerline/themes/{ext}/{THEME_NAME}.json`. 
     ``KEY.NESTED_KEY=VALUE`` is processed like described above, ``{ext}`` is the 
     first argument to powerline script. May be passed multiple times.
+
+    If ``VALUE`` is omitted then corresponding key will be removed from the 
+    configuration (if it was present).
 
 ``-p PATH`` or ``--config_path=PATH``
     Sets directory where configuration should be read from. If present, no 
@@ -540,8 +593,37 @@ specific powerline implementation. This is mostly useful for putting powerline
 into different directory or replacing ``powerline`` script with 
 ``powerline-client`` for performance reasons.
 
-Note: ``$POWERLINE_COMMAND`` appears in shell scripts without quotes thus you 
-can specify additional parameters in bash. In zsh you will have to make 
-``$POWERLINE_COMMAND`` an array parameter to achieve the same result. In tmux it 
-is passed to ``eval`` and depends on the shell used. POSIX-compatible shells, 
-zsh, bash and fish will split this variable in this case.
+.. note::
+
+    ``$POWERLINE_COMMAND`` appears in shell scripts without quotes thus you can 
+    specify additional parameters in bash. In zsh you will have to make 
+    ``$POWERLINE_COMMAND`` an array parameter to achieve the same result. In 
+    tmux it is passed to ``eval`` and depends on the shell used. 
+    POSIX-compatible shells, zsh, bash and fish will split this variable in this 
+    case.
+
+If you want to disable prompt in shell, but still have tmux support or if you 
+want to disable tmux support you can use variables 
+``$POWERLINE_NO_{SHELL}_PROMPT``/``$POWERLINE_NO_SHELL_PROMPT`` and 
+``$POWERLINE_NO_{SHELL}_TMUX_SUPPORT``/``$POWERLINE_NO_SHELL_TMUX_SUPPORT`` 
+(substitute ``{SHELL}`` with the name of the shell (all-caps) you want to 
+disable support for (e.g. ``BASH``) or use all-inclusive ``SHELL`` that will 
+disable support for all shells). These variables have no effect after 
+configuration script was sourced (in fish case: after ``powerline-setup`` 
+function was run). To disable specific feature support set one of these 
+variables to some non-empty value.
+
+If you do not want to disable prompt in shell, but yet do not want to launch 
+python twice to get :ref:`above <config-themes-above>` lines you do not use in 
+tcsh you should set ``$POWERLINE_NO_TCSH_ABOVE`` or 
+``$POWERLINE_NO_SHELL_ABOVE`` variable.
+
+If you do not want to see additional space which is added to the right prompt in 
+fish in order to support multiline prompt you should set 
+``$POWERLINE_NO_FISH_ABOVE`` or ``$POWERLINE_NO_SHELL_ABOVE`` variables.
+
+.. note::
+
+    Most supported shells’ configuration scripts check for additional 
+    configuration variables being empty. But tcsh configuration script checks 
+    for variables being *defined*, not empty.

@@ -99,6 +99,10 @@ _powerline_set_jobnum() {
 	_POWERLINE_JOBNUM=${(%):-%j}
 }
 
+_powerline_update_counter() {
+	zpython '_powerline.precmd()'
+}
+
 _powerline_setup_prompt() {
 	emulate -L zsh
 	for f in "${precmd_functions[@]}"; do
@@ -107,12 +111,15 @@ _powerline_setup_prompt() {
 		fi
 	done
 	precmd_functions+=( _powerline_set_jobnum )
-	if zmodload zsh/zpython &>/dev/null ; then
+	VIRTUAL_ENV_DISABLE_PROMPT=1
+	if test -z "${POWERLINE_NO_ZSH_ZPYTHON}" && { zmodload libzpython || zmodload zsh/zpython } &>/dev/null ; then
+		precmd_functions+=( _powerline_update_counter )
 		zpython 'from powerline.bindings.zsh import setup as _powerline_setup'
-		zpython '_powerline_setup()'
+		zpython '_powerline = _powerline_setup()'
 		zpython 'del _powerline_setup'
 	else
-		local add_args='--last_exit_code=$? --last_pipe_status="$pipestatus"'
+		local add_args='--last_exit_code=$?'
+		add_args+=' --last_pipe_status="$pipestatus"'
 		add_args+=' --renderer_arg="client_id=$$"'
 		add_args+=' --jobnum=$_POWERLINE_JOBNUM'
 		local add_args_2=$add_args' -R parser_state=${(%%):-%_} -R local_theme=continuation'
@@ -152,6 +159,10 @@ _powerline_add_widget() {
 
 setopt promptpercent
 setopt promptsubst
-_powerline_setup_prompt
-_powerline_init_tmux_support
-_powerline_init_modes_support
+if test -z "$POWERLINE_NO_ZSH_PROMPT$POWERLINE_NO_SHELL_PROMPT" ; then
+	_powerline_setup_prompt
+	_powerline_init_modes_support
+fi
+if test -z "$POWERLINE_NO_ZSH_TMUX_SUPPORT$POWERLINE_NO_SHELL_TMUX_SUPPORT" ; then
+	_powerline_init_tmux_support
+fi

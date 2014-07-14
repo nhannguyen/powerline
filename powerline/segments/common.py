@@ -18,7 +18,7 @@ from powerline.lib.threaded import ThreadedSegment, KwThreadedSegment, with_docs
 from powerline.lib.monotonic import monotonic
 from powerline.lib.humanize_bytes import humanize_bytes
 from powerline.lib.unicode import u
-from powerline.theme import requires_segment_info
+from powerline.theme import requires_segment_info, requires_filesystem_watcher
 from collections import namedtuple
 
 
@@ -51,8 +51,9 @@ def hostname(pl, segment_info, only_if_ssh=False, exclude_domain=False):
 	return socket.gethostname()
 
 
+@requires_filesystem_watcher
 @requires_segment_info
-def branch(pl, segment_info, status_colors=False):
+def branch(pl, segment_info, create_watcher, status_colors=False):
 	'''Return the current VCS branch.
 
 	:param bool status_colors:
@@ -61,7 +62,7 @@ def branch(pl, segment_info, status_colors=False):
 	Highlight groups used: ``branch_clean``, ``branch_dirty``, ``branch``.
 	'''
 	name = segment_info['getcwd']()
-	repo = guess(path=name)
+	repo = guess(path=name, create_watcher=create_watcher)
 	if repo is not None:
 		branch = repo.branch()
 		scol = ['branch']
@@ -1105,19 +1106,29 @@ class NowPlayingSegment(object):
 now_playing = NowPlayingSegment()
 
 
-if os.path.exists('/sys/class/power_supply/BAT0/capacity'):
-	def _get_capacity(pl):
-		with open('/sys/class/power_supply/BAT0/capacity', 'r') as f:
-			return int(float(f.readline().split()[0]))
-elif os.path.exists('/usr/bin/pmset'):
-	def _get_capacity(pl):
-		import re
-		battery_summary = run_cmd(pl, ['pmset', '-g', 'batt'])
-		battery_percent = re.search(r'(\d+)%', battery_summary).group(1)
-		return int(battery_percent)
-else:
-	def _get_capacity(pl):
+try:
+	if os.path.exists('/sys/class/power_supply/'):
+		_linux_bat_fmt = '/sys/class/power_supply/{0}/capacity'
+		_linux_bat = 'BAT0'
+		if not os.path.exists(_linux_bat_fmt.format(_linux_bat)):
+			_linux_bat = 'BAT1'
+		if not os.path.exists(_linux_bat_fmt.format(_linux_bat)):
+			raise NotImplementedError
+		def _get_capacity(pl):
+			with open(_linux_bat_fmt.format(_linux_bat), 'r') as f:
+				return int(float(f.readline().split()[0]))
+	else:
 		raise NotImplementedError
+except NotImplementedError:
+	if os.path.exists('/usr/bin/pmset'):
+		def _get_capacity(pl):
+			import re
+			battery_summary = run_cmd(pl, ['pmset', '-g', 'batt'])
+			battery_percent = re.search(r'(\d+)%', battery_summary).group(1)
+			return int(battery_percent)
+	else:
+		def _get_capacity(pl):
+			raise NotImplementedError
 
 
 def battery(pl, format='{capacity:3.0%}', steps=5, gamify=False, full_heart='♥', empty_heart='♥'):
@@ -1129,14 +1140,21 @@ def battery(pl, format='{capacity:3.0%}', steps=5, gamify=False, full_heart='♥
 		Number of discrete steps to show between 0% and 100% capacity if gamify
 		is True.
 	:param bool gamify:
-		Measure in hearts (♥) instead of percentages.
+		Measure in hearts (♥) instead of percentages. For full hearts 
+		``battery_full`` highlighting group is preferred, for empty hearts there 
+		is ``battery_empty``.
 	:param str full_heart:
 		Heart displayed for “full” part of battery.
 	:param str empty_heart:
 		Heart displayed for “used” part of battery. It is also displayed using
-		another gradient level, so it is OK for it to be the same as full_heart.
+		another gradient level and highlighting group, so it is OK for it to be 
+		the same as full_heart as long as necessary highlighting groups are 
+		defined.
 
-	Highlight groups used: ``battery_gradient`` (gradient), ``battery``.
+	``battery_gradient`` and ``battery`` groups are used in any case, first is 
+	preferred.
+
+	Highlight groups used: ``battery_full`` or ``battery_gradient`` (gradient) or ``battery``, ``battery_empty`` or ``battery_gradient`` (gradient) or ``battery``.
 	'''
 	try:
 		capacity = _get_capacity(pl)
@@ -1150,19 +1168,23 @@ def battery(pl, format='{capacity:3.0%}', steps=5, gamify=False, full_heart='♥
 		ret.append({
 			'contents': full_heart * numer,
 			'draw_inner_divider': False,
-			'highlight_group': ['battery_gradient', 'battery'],
-			'gradient_level': 99,
+			'highlight_group': ['battery_full', 'battery_gradient', 'battery'],
+			# Using zero as “nothing to worry about”: it is least alert color.
+			'gradient_level': 0,
 		})
 		ret.append({
 			'contents': empty_heart * (denom - numer),
 			'draw_inner_divider': False,
-			'highlight_group': ['battery_gradient', 'battery'],
-			'gradient_level': 1,
+			'highlight_group': ['battery_empty', 'battery_gradient', 'battery'],
+			# Using a hundred as it is most alert color.
+			'gradient_level': 100,
 		})
 	else:
 		ret.append({
 			'contents': format.format(capacity=(capacity / 100.0)),
 			'highlight_group': ['battery_gradient', 'battery'],
-			'gradient_level': capacity,
+			# Gradients are “least alert – most alert” by default, capacity has 
+			# the opposite semantics.
+			'gradient_level': 100 - capacity,
 		})
 	return ret

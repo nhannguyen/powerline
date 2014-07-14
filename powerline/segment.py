@@ -1,6 +1,8 @@
 # vim:fileencoding=utf-8:noet
 
-from __future__ import absolute_import
+from __future__ import absolute_import, unicode_literals, division, print_function
+
+from powerline.lib.file_watcher import create_file_watcher
 import sys
 
 
@@ -45,10 +47,22 @@ segment_getters = {
 }
 
 
-def gen_segment_getter(pl, ext, path, theme_configs, default_module=None):
+def get_attr_func(contents_func, key, args):
+	try:
+		func = getattr(contents_func, key)
+	except AttributeError:
+		return None
+	else:
+		if args is None:
+			return lambda: func()
+		else:
+			return lambda pl, shutdown_event: func(pl=pl, shutdown_event=shutdown_event, **args)
+
+
+def gen_segment_getter(pl, ext, common_config, theme_configs, default_module=None):
 	data = {
 		'default_module': default_module or 'powerline.segments.' + ext,
-		'path': path,
+		'path': common_config['paths'],
 	}
 
 	def get_key(segment, module, key, default=None):
@@ -75,12 +89,12 @@ def gen_segment_getter(pl, ext, path, theme_configs, default_module=None):
 
 		if segment_type == 'function':
 			args = dict(((str(k), v) for k, v in get_key(segment, module, 'args', {}).items()))
-			try:
-				_startup_func = _contents_func.startup
-			except AttributeError:
-				startup_func = None
-			else:
-				startup_func = lambda pl, shutdown_event: _startup_func(pl=pl, shutdown_event=shutdown_event, **args)
+			startup_func = get_attr_func(_contents_func, 'startup', args)
+			shutdown_func = get_attr_func(_contents_func, 'shutdown', None)
+
+			if hasattr(_contents_func, 'powerline_requires_filesystem_watcher'):
+				create_watcher = lambda: create_file_watcher(pl, common_config['watcher'])
+				args['create_watcher'] = create_watcher
 
 			if hasattr(_contents_func, 'powerline_requires_segment_info'):
 				contents_func = lambda pl, segment_info: _contents_func(pl=pl, segment_info=segment_info, **args)
@@ -88,6 +102,7 @@ def gen_segment_getter(pl, ext, path, theme_configs, default_module=None):
 				contents_func = lambda pl, segment_info: _contents_func(pl=pl, **args)
 		else:
 			startup_func = None
+			shutdown_func = None
 			contents_func = None
 
 		return {
@@ -109,8 +124,8 @@ def gen_segment_getter(pl, ext, path, theme_configs, default_module=None):
 			'include_modes': segment.get('include_modes', []),
 			'width': segment.get('width'),
 			'align': segment.get('align', 'l'),
-			'shutdown': getattr(contents_func, 'shutdown', None),
 			'startup': startup_func,
+			'shutdown': shutdown_func,
 			'_rendered_raw': '',
 			'_rendered_hl': '',
 			'_len': 0,

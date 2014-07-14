@@ -6,7 +6,8 @@ import os
 import sys
 import re
 
-from powerline.lib.vcs import get_branch_name as _get_branch_name, get_file_status
+from powerline.lib.vcs import get_branch_name, get_file_status
+from powerline.lib.shell import readlines
 
 
 _ref_pat = re.compile(br'ref:\s*refs/heads/(.+)')
@@ -32,6 +33,8 @@ def git_directory(directory):
 			if not raw.startswith(b'gitdir: '):
 				raise IOError('invalid gitfile format')
 			raw = raw[8:].decode(sys.getfilesystemencoding() or 'utf-8')
+			if raw[-1] == '\n':
+				raw = raw[:-1]
 			if not raw:
 				raise IOError('no path in gitfile')
 			return os.path.abspath(os.path.join(directory, raw))
@@ -39,39 +42,61 @@ def git_directory(directory):
 		return path
 
 
-def get_branch_name(base_dir):
-	head = os.path.join(git_directory(base_dir), 'HEAD')
-	return _get_branch_name(base_dir, head, branch_name_from_config_file)
+class GitRepository(object):
+	__slots__ = ('directory', 'create_watcher')
 
+	def __init__(self, directory, create_watcher):
+		self.directory = os.path.abspath(directory)
+		self.create_watcher = create_watcher
 
-def do_status(directory, path, func):
-	if path:
-		gitd = git_directory(directory)
-		# We need HEAD as without it using fugitive to commit causes the
-		# current file's status (and only the current file) to not be updated
-		# for some reason I cannot be bothered to figure out.
-		return get_file_status(
-			directory, os.path.join(gitd, 'index'),
-			path, '.gitignore', func, extra_ignore_files=tuple(os.path.join(gitd, x) for x in ('logs/HEAD', 'info/exclude')))
-	return func(directory, path)
+	def status(self, path=None):
+		'''Return status of repository or file.
 
+		Without file argument: returns status of the repository:
 
-def ignore_event(path, name):
-	# Ignore changes to the index.lock file, since they happen frequently and
-	# dont indicate an actual change in the working tree status
-	return False
-	return path.endswith('.git') and name == 'index.lock'
+		:First column: working directory status (D: dirty / space)
+		:Second column: index status (I: index dirty / space)
+		:Third column: presence of untracked files (U: untracked files / space)
+		:None: repository clean
+
+		With file argument: returns status of this file. Output is
+		equivalent to the first two columns of "git status --porcelain"
+		(except for merge statuses as they are not supported by libgit2).
+		'''
+		if path:
+			gitd = git_directory(self.directory)
+			# We need HEAD as without it using fugitive to commit causes the
+			# current file's status (and only the current file) to not be updated
+			# for some reason I cannot be bothered to figure out.
+			return get_file_status(
+				directory=self.directory,
+				dirstate_file=os.path.join(gitd, 'index'),
+				file_path=path,
+				ignore_file_name='.gitignore',
+				get_func=self.do_status,
+				create_watcher=self.create_watcher,
+				extra_ignore_files=tuple(os.path.join(gitd, x) for x in ('logs/HEAD', 'info/exclude')),
+			)
+		return self.do_status(self.directory, path)
+
+	def branch(self):
+		directory = git_directory(self.directory)
+		head = os.path.join(directory, 'HEAD')
+		return get_branch_name(
+			directory=directory,
+			config_file=head,
+			get_func=branch_name_from_config_file,
+			create_watcher=self.create_watcher,
+		)
 
 
 try:
 	import pygit2 as git
 
-	class Repository(object):
-		__slots__ = ('directory', 'ignore_event')
-
-		def __init__(self, directory):
-			self.directory = os.path.abspath(directory)
-			self.ignore_event = ignore_event
+	class Repository(GitRepository):
+		@staticmethod
+		def ignore_event(path, name):
+			return False
 
 		def do_status(self, directory, path):
 			if path:
@@ -124,41 +149,14 @@ try:
 						index_column = 'I'
 				r = wt_column + index_column + untracked_column
 				return r if r != '   ' else None
-
-		def status(self, path=None):
-			'''Return status of repository or file.
-
-			Without file argument: returns status of the repository:
-
-			:First column: working directory status (D: dirty / space)
-			:Second column: index status (I: index dirty / space)
-			:Third column: presence of untracked files (U: untracked files / space)
-			:None: repository clean
-
-			With file argument: returns status of this file. Output is
-			equivalent to the first two columns of "git status --porcelain"
-			(except for merge statuses as they are not supported by libgit2).
-			'''
-			return do_status(self.directory, path, self.do_status)
-
-		def branch(self):
-			return get_branch_name(self.directory)
 except ImportError:
-	from subprocess import Popen, PIPE
-
-	def readlines(cmd, cwd):
-		p = Popen(cmd, shell=False, stdout=PIPE, stderr=PIPE, cwd=cwd)
-		p.stderr.close()
-		with p.stdout:
-			for line in p.stdout:
-				yield line[:-1].decode('utf-8')
-
-	class Repository(object):
-		__slots__ = ('directory', 'ignore_event')
-
-		def __init__(self, directory):
-			self.directory = os.path.abspath(directory)
-			self.ignore_event = ignore_event
+	class Repository(GitRepository):
+		@staticmethod
+		def ignore_event(path, name):
+			# Ignore changes to the index.lock file, since they happen 
+			# frequently and dont indicate an actual change in the working tree 
+			# status
+			return path.endswith('.git') and name == 'index.lock'
 
 		def _gitcmd(self, directory, *args):
 			return readlines(('git',) + args, directory)
@@ -188,9 +186,3 @@ except ImportError:
 
 				r = wt_column + index_column + untracked_column
 				return r if r != '   ' else None
-
-		def status(self, path=None):
-			return do_status(self.directory, path, self.do_status)
-
-		def branch(self):
-			return get_branch_name(self.directory)

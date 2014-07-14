@@ -1,7 +1,6 @@
 {
-	"name": "Solarized Dark",
+	"name": "Solarized dark for shell",
 	"groups": {
-		"jobnum":               { "fg": "oldlace", "bg": "darkgreencopper" },
 		"user":                 { "fg": "oldlace", "bg": "blue", "attr": ["bold"] },
 		"superuser":            { "fg": "oldlace", "bg": "red", "attr": ["bold"] },
 		"virtualenv":           { "fg": "oldlace", "bg": "green" },
@@ -14,13 +13,14 @@
 		"cwd:current_folder":   { "fg": "oldlace", "bg": "darkgreencopper", "attr": ["bold"] },
 		"cwd:divider":          { "fg": "gray61", "bg": "darkgreencopper" },
 		"hostname":             { "fg": "oldlace", "bg": "darkgreencopper" },
-		"exit_fail":            { "fg": "oldlace", "bg": "red" },
-		"exit_success":         { "fg": "oldlace", "bg": "green" },
 		"environment":          { "fg": "oldlace", "bg": "green" },
-		"mode":                 { "fg": "oldlace", "bg": "green", "attr": ["bold"] },
     "date":                 { "fg": "oldlace", "bg": "gray2" },
     "time":                 { "fg": "oldlace", "bg": "gray2" },
-    "time:divider":         { "fg": "oldlace", "bg": "gray2" }
+    "time:divider":         { "fg": "oldlace", "bg": "gray2" },
+		"jobnum":             { "fg": "oldlace", "bg": "darkgreencopper", "attr": [] },
+		"exit_fail":          { "fg": "oldlace", "bg": "red", "attr": [] },
+		"exit_success":       { "fg": "oldlace", "bg": "green", "attr": [] },
+		"mode":               { "fg": "oldlace", "bg": "green", "attr": ["bold"] }
 	},
 	"mode_translations": {
 		"vicmd": {
